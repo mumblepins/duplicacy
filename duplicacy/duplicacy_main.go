@@ -25,6 +25,8 @@ import (
 	"io/ioutil"
 
 	"github.com/gilbertchen/duplicacy/src"
+	"compress/zlib"
+	"github.com/DataDog/zstd"
 )
 
 const (
@@ -318,6 +320,8 @@ func configRepository(context *cli.Context, init bool) {
 			"The storage '%s' has already been initialized", preference.StorageURL)
 		if existingConfig.CompressionLevel >= -1 && existingConfig.CompressionLevel <= 9 {
 			duplicacy.LOG_INFO("STORAGE_FORMAT", "This storage is configured to use the pre-1.2.0 format")
+		} else if existingConfig.CompressionLevel >= 201 && existingConfig.CompressionLevel <= 219 {
+			duplicacy.LOG_INFO("STORAGE_FORMAT", "This storage is configured to use ZSTD Compression level %d", existingConfig.CompressionLevel-200)
 		} else if existingConfig.CompressionLevel != 100 {
 			duplicacy.LOG_ERROR("STORAGE_COMPRESSION", "This storage is configured with an invalid compression level %d", existingConfig.CompressionLevel)
 			return
@@ -328,7 +332,37 @@ func configRepository(context *cli.Context, init bool) {
 			existingConfig.Print()
 		}
 	} else {
-		compressionLevel := 100
+		var compressionLevel int
+
+		if strings.EqualFold(context.String("compressor"), "lz4") {
+			compressionLevel = 100
+		} else if strings.EqualFold(context.String("compressor"), "zlib") {
+			if context.Int("compresslevel") == -100 {
+				compressionLevel = zlib.DefaultCompression
+			} else if context.Int("compresslevel") >= -1 &&
+				context.Int("compresslevel") <= 9 {
+				compressionLevel = context.Int("compresslevel")
+			} else {
+				fmt.Fprintf(context.App.Writer, "Invalid Zlib compression level: %d.\n\n", context.Int("compresslevel"))
+				cli.ShowCommandHelp(context, context.Command.Name)
+				os.Exit(ArgumentExitCode)
+			}
+		} else if strings.EqualFold(context.String("compressor"), "zstd") {
+			if context.Int("compresslevel") == -100 {
+				compressionLevel = zstd.DefaultCompression + 200
+			} else if context.Int("compresslevel") >= 1 &&
+				context.Int("compresslevel") <= 19 {
+				compressionLevel = context.Int("compresslevel") + 200
+			} else {
+				fmt.Fprintf(context.App.Writer, "Invalid Zstd compression level: %d.\n\n", context.Int("compresslevel"))
+				cli.ShowCommandHelp(context, context.Command.Name)
+				os.Exit(ArgumentExitCode)
+			}
+		} else {
+			fmt.Fprintf(context.App.Writer, "Invalid Compression Type : %s.\n\n", context.String("compressor"))
+			cli.ShowCommandHelp(context, context.Command.Name)
+			os.Exit(ArgumentExitCode)
+		}
 
 		averageChunkSize := duplicacy.AtoSize(context.String("chunk-size"))
 		if averageChunkSize == 0 {
@@ -1279,6 +1313,18 @@ func main() {
 					Usage:    "assign a name to the storage",
 					Argument: "<name>",
 				},
+				cli.StringFlag{
+					Name:     "compressor",
+					Value:    "lz4",
+					Usage:    "compression type, valid values are lz4, zlib, and zstd (default is lz4)",
+					Argument: "<type>",
+				},
+				cli.IntFlag{
+					Name:     "compresslevel",
+					Value:    -100,
+					Usage:    "compression level, valid values: lz4 (N/A), zlib (-1-9 [default 6]), zstd (1-19 [default 5])",
+					Argument: "<type>",
+				},
 			},
 			Usage:     "Initialize the storage if necessary and the current directory as the repository",
 			ArgsUsage: "<snapshot id> <storage url>",
@@ -1674,8 +1720,20 @@ func main() {
 					Argument: "<storage name>",
 				},
 				cli.BoolFlag{
-					Name:     "bit-identical",
-					Usage:    "(when using -copy) make the new storage bit-identical to also allow rsync etc.",
+					Name:  "bit-identical",
+					Usage: "(when using -copy) make the new storage bit-identical to also allow rsync etc.",
+				},
+				cli.StringFlag{
+					Name:     "compressor",
+					Value:    "lz4",
+					Usage:    "compression type, valid values are lz4, zlib, and zstd (default is lz4)",
+					Argument: "<type>",
+				},
+				cli.IntFlag{
+					Name:     "compresslevel",
+					Value:    -100,
+					Usage:    "compression level, valid values: lz4 (N/A), zlib (-1-9 [default 6]), zstd (1-19 [default 5])",
+					Argument: "<type>",
 				},
 			},
 			Usage:     "Add an additional storage to be used for the existing repository",

@@ -279,7 +279,8 @@ func (hasher *DummyHasher) BlockSize() int {
 func (config *Config) NewFileHasher() hash.Hash {
 	if SkipFileHash {
 		return &DummyHasher{}
-	} else if config.CompressionLevel == DEFAULT_COMPRESSION_LEVEL {
+	} else if config.CompressionLevel == DEFAULT_COMPRESSION_LEVEL ||
+		(config.CompressionLevel >= 201 && config.CompressionLevel <= 219) {
 		hasher, _ := blake2.New(&blake2.Config{Size: 32})
 		return hasher
 	} else {

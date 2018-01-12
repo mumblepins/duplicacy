@@ -17,6 +17,7 @@ import (
 	"runtime"
 
 	"github.com/bkaradzic/go-lz4"
+	"github.com/DataDog/zstd"
 )
 
 // A chunk needs to acquire a new buffer and return the old one for every encrypt/decrypt operation, therefore
@@ -235,6 +236,10 @@ func (chunk *Chunk) Encrypt(encryptionKey []byte, derivationKey string) (err err
 		// written is actually encryptedBuffer[offset + 4:], but we need to move the write pointer
 		// and this seems to be the only way
 		encryptedBuffer.Write(written)
+	} else if chunk.config.CompressionLevel >= 201 && chunk.config.CompressionLevel <= 219 {
+		deflater := zstd.NewWriterLevel(encryptedBuffer, chunk.config.CompressionLevel-200)
+		deflater.Write(chunk.buffer.Bytes())
+		deflater.Close()
 	} else {
 		return fmt.Errorf("Invalid compression level: %d", chunk.config.CompressionLevel)
 	}
@@ -360,9 +365,15 @@ func (chunk *Chunk) Decrypt(encryptionKey []byte, derivationKey string) (err err
 		chunk.hash = nil
 		return nil
 	}
-	inflater, err := zlib.NewReader(encryptedBuffer)
-	if err != nil {
-		return err
+	var inflater io.ReadCloser
+	if len(compressed) > 4 && bytes.Equal(compressed[:4], []byte{0x28, 0xB5, 0x2F, 0xFD}) {
+		inflater = zstd.NewReader(encryptedBuffer)
+	} else {
+		inflater, err = zlib.NewReader(encryptedBuffer)
+
+		if err != nil {
+			return err
+		}
 	}
 
 	defer inflater.Close()
